@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch_scatter import scatter
 import numpy as np
 class HeirarchEmbedding(nn.Module):
     def __init__(self, code_levels: np.ndarray, max_vals, code_dims):
@@ -16,6 +17,23 @@ class HeirarchEmbedding(nn.Module):
         
         return hierairchial_embeddings
 
+class HSL1(nn.Module):
+    def __init__(self, emb_dim):
+        super(HSL1, self).__init__()
+        self.mlp1 = nn.Linear(emb_dim * 2, 256)
+        self.act = nn.ReLU()
+        self.mlp2 = nn.Linear(emb_dim, 1)
+    
+    def forward(self, x, v, e):
+        ex = scatter(x[v], e, dim=0, reduce='mean')
+        return
+    
+class HSL2(nn.Module):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def forward(self):
+        return
 
 class shy(nn.Module):
     def __init__(self, code_levels, single_dims, device):
