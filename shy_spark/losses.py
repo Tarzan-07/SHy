@@ -5,18 +5,18 @@ class losses:
         self.w = w
         pass
 
-    def _Lpred(self):
+    def Lpred(self):
         return
 
-    def _Lfidleity(self):
+    def Lfidleity(self):
         return
 
-    def _Ldistinct(self):
+    def Ldistinct(self):
         return
 
-    def _Lalpha(self):
+    def Lalpha(self):
         return
     
     def loss(self):
-        L = self._Lpred + self.epsilon*self._Lfidleity+self.neta*self._Ldistinct+self.w*self._Lalpha
+        L = self.Lpred + self.epsilon*self.Lfidleity+self.neta*self.Ldistinct+self.w*self.Lalpha
         return L
