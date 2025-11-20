@@ -26,6 +26,7 @@ class HSL1(nn.Module):
     
     def forward(self, x, v, e):
         ex = scatter(x[v], e, dim=0, reduce='mean')
+        O = self.act(self.mlp1())
         return
     
 class HSL2(nn.Module):
