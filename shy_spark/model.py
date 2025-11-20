@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_scatter import scatter
 import numpy as np
+from layers import *
 class HeirarchEmbedding(nn.Module):
     def __init__(self, code_levels: np.ndarray, max_vals, code_dims):
         super(HeirarchEmbedding, self).__init__()
@@ -17,23 +18,129 @@ class HeirarchEmbedding(nn.Module):
         
         return hierairchial_embeddings
 
-class HSL1(nn.Module):
-    def __init__(self, emb_dim):
-        super(HSL1, self).__init__()
-        self.mlp1 = nn.Linear(emb_dim * 2, 256)
-        self.act = nn.ReLU()
-        self.mlp2 = nn.Linear(emb_dim, 1)
-    
-    def forward(self, x, v, e):
-        ex = scatter(x[v], e, dim=0, reduce='mean')
-        O = self.act(self.mlp1())
-        return
-    
-class HSL2(nn.Module):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
 
-    def forward(self):
+
+class HGNN(nn.Module):
+    def __init__(self, nfeat, nhid, nclass, nlayer, nhead, dropout_p, hgnn_model, device):
+        super(HGNN, self).__init__()
+        self.nlayer = nlayer
+        self.HGNN_model = hgnn_model
+        if hgnn_model == 'UniGINConv':
+            self.convs = nn.ModuleList(
+                [UniGINConv(nfeat, nhid, heads=nhead, dropout=0.)] +
+                [UniGINConv(nhid * nhead, nhid, heads=nhead, dropout=0.) for _ in range(self.nlayer - 1)]
+            )
+            if self.nlayer > 0:
+                self.conv_out = UniGINConv(nhid * nhead, nclass, heads=1, dropout=0.)
+            else:
+                self.conv_out = UniGINConv(nfeat, nclass, heads=1, dropout=0.)
+        elif hgnn_model == 'UniSAGEConv':
+            self.convs = nn.ModuleList(
+                [UniSAGEConv(nfeat, nhid, heads=nhead, dropout=0.)] +
+                [UniSAGEConv(nhid * nhead, nhid, heads=nhead, dropout=0.) for _ in range(self.nlayer - 1)]
+            )
+            if self.nlayer > 0:
+                self.conv_out = UniSAGEConv(nhid * nhead, nclass, heads=1, dropout=0.)
+            else:
+                self.conv_out = UniSAGEConv(nfeat, nclass, heads=1, dropout=0.)
+        elif hgnn_model == 'UniGATConv':
+            self.convs = nn.ModuleList(
+                [UniGATConv(nfeat, nhid, heads=nhead, dropout=0.)] +
+                [UniGATConv(nhid * nhead, nhid, heads=nhead, dropout=0.) for _ in range(self.nlayer - 1)]
+            )
+            if self.nlayer > 0:
+                self.conv_out = UniGATConv(nhid * nhead, nclass, heads=1, dropout=0.)
+            else:
+                self.conv_out = UniGATConv(nfeat, nclass, heads=1, dropout=0.)
+        elif hgnn_model == 'UniGCNConv':
+            self.convs = nn.ModuleList(
+                [UniGCNConv(nfeat, nhid, heads=nhead, dropout=0.)] +
+                [UniGCNConv(nhid * nhead, nhid, heads=nhead, dropout=0.) for _ in range(self.nlayer - 1)]
+            )
+            if self.nlayer > 0:
+                self.conv_out = UniGCNConv(nhid * nhead, nclass, heads=1, dropout=0.)
+            else:
+                self.conv_out = UniGCNConv(nfeat, nclass, heads=1, dropout=0.)
+        elif hgnn_model == 'UniGCNIIConv':
+            self.prelude = nn.Linear(nfeat, nhid)
+            self.convs = nn.ModuleList(
+                [UniGCNIIConv(nhid, nhid, heads=nhead, dropout=0.)] +
+                [UniGCNIIConv(nhid, nhid, heads=nhead, dropout=0.) for _ in range(self.nlayer - 1)]
+            )
+            if self.nlayer > 0:
+                self.conv_out = UniGCNIIConv(nhid, nhid, heads=1, dropout=0.)
+                self.postlude = nn.Linear(nhid, nclass)
+            else:
+                self.conv_out = UniGCNIIConv(nfeat, nfeat, heads=1, dropout=0.)
+                self.postlude = nn.Linear(nfeat, nclass)
+        elif hgnn_model == 'AllDeepSets':
+            self.convs = nn.ModuleList(
+                [AllSet(nfeat, nhid, heads=nhead, aggr='add', PMA=False, device=device, dropout=dropout_p)] +
+                [AllSet(nhid, nhid, heads=nhead, aggr='add', PMA=False, device=device, dropout=dropout_p) for _ in range(self.nlayer - 1)]
+            )
+            if self.nlayer > 0:
+                self.conv_out = AllSet(nhid, nclass, heads=nhead, aggr='add', PMA=False, device=device, dropout=dropout_p)
+            else:
+                self.conv_out = AllSet(nfeat, nclass, heads=nhead, aggr='add', PMA=False, device=device, dropout=dropout_p)
+        elif hgnn_model == 'AllSetTransformer':
+            self.convs = nn.ModuleList(
+                [AllSet(nfeat, nhid, heads=nhead, aggr='mean', PMA=True, device=device, dropout=dropout_p)] +
+                [AllSet(nhid, nhid, heads=nhead, aggr='mean', PMA=True, device=device, dropout=dropout_p) for _ in range(self.nlayer - 1)]
+            )
+            if self.nlayer > 0:
+                self.conv_out = AllSet(nhid, nclass, heads=nhead, aggr='mean', PMA=True, device=device, dropout=dropout_p)
+            else:
+                self.conv_out = AllSet(nfeat, nclass, heads=nhead, aggr='mean', PMA=True, device=device, dropout=dropout_p)
+        elif hgnn_model == 'HyperGCNConv':
+            self.convs = nn.ModuleList(
+                [HyperGCNConv(nfeat, nhid, True, device, dropout_p)] +
+                [HyperGCNConv(nfeat, nhid, True, device, dropout_p) for _ in range(self.nlayer - 1)]
+            )
+            if self.nlayer > 0:
+                self.conv_out = HyperGCNConv(nhid, nclass, True, device, dropout_p)
+            else:
+                self.conv_out = HyperGCNConv(nfeat, nclass, True, device, dropout_p)
+        else:
+            print("Error: no selected hypergraph neural network model.")
+        self.act = nn.LeakyReLU()
+        self.dropout = nn.Dropout(dropout_p)
+
+    def forward(self, X, V, E, H):
+        if self.HGNN_model == "UniGCNConv":
+            if self.nlayer > 0:
+                for conv in self.convs:
+                    X = conv(X, V, E, H)
+                    X = self.act(X)
+                    X = self.dropout(X)
+            X = self.conv_out(X, V, E, H)
+        elif self.HGNN_model == "UniGCNIIConv":
+            if self.nlayer > 0:
+                X = F.relu(self.prelude(X))
+                X0 = X
+                for conv in self.convs:
+                    X = conv(X, V, E, X0, H)
+                    X = self.act(X)
+                    X = self.dropout(X)
+                X = self.conv_out(X, V, E, X0, H)
+                X = self.postlude(X)
+            else:
+                X = self.conv_out(X, V, E, X, H)
+                X = self.postlude(X)
+        else:
+            if self.nlayer > 0:
+                for conv in self.convs:
+                    X = conv(X, V, E)
+                    X = self.act(X)
+                    X = self.dropout(X)
+            X = self.conv_out(X, V, E)
+        return F.leaky_relu(X)
+
+
+class hslencoder():
+    def __init__(self):
+        pass
+
+    def forward():
         return
 
 class shy(nn.Module):
@@ -43,13 +150,11 @@ class shy(nn.Module):
         code_levels = torch.from_numpy(code_levels).to(device)
 
         self.hier_embed_layer = HeirarchEmbedding(code_levels=code_levels, max_vals=max_vals, code_dims=code_dims)
-
+        self.encoder = hslencoder()
 
 
     def forward(self, x):
-        uw = torch.dot(self.U, self.W.t)
-        ypred = self.alpha*self.softmax(uw + self.b)
-        return ypred
-
-    def backward():
         return
+
+    # def backward():
+    #     return
