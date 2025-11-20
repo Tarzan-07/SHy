@@ -142,6 +142,20 @@ class hslencoder():
 
     def forward():
         return
+    
+class hsldecoder():
+    def __init__(self):
+        pass
+
+    def forward():
+        return
+
+class FC(nn.Module):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def forward():
+        return
 
 class shy(nn.Module):
     def __init__(self, code_levels, single_dims, device):
@@ -151,6 +165,8 @@ class shy(nn.Module):
 
         self.hier_embed_layer = HeirarchEmbedding(code_levels=code_levels, max_vals=max_vals, code_dims=code_dims)
         self.encoder = hslencoder()
+        self.decoder = hsldecoder()
+
 
 
     def forward(self, x):
