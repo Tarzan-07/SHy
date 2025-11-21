@@ -216,7 +216,7 @@ class HSLEncoder(nn.Module):
         self.K = K
         self.hsl1 = nn.ModuleList(HSL1(after_HGNN_dim) for _ in range(self.K))
         self.hsl2 = nn.ModuleList(HSL2(n_c, after_HGNN_dim, addr, temp) for temp, addr in zip(temperature, add_ratio))
-        self.hyperG = HyperG()
+        self.hyperG = HyperG(after_HGNN_dim, hid_state_dim)
 
     def forward(self):
         pass
