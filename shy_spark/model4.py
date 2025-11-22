@@ -209,18 +209,36 @@ class HSLEncoder(nn.Module):
         super().__init__()
         self.HGNN_layer_num = HGNN_layer_num
         if HGNN_layer_num >= 0:
-            self.firstHGNN = HGNN(sum(code_dims), HGNN_dim, after_HGNN_dim, HGNN_layer_num, nhead, dropout, HGNN_model, device)
+            self.hgnn = HGNN(sum(code_dims), HGNN_dim, after_HGNN_dim, HGNN_layer_num, nhead, dropout, HGNN_model, device)
         else:
-            self.NoneHGNN = nn.Linear(sum(code_dims), after_HGNN_dim)
+            self.nohgnn = nn.Linear(sum(code_dims), after_HGNN_dim)
 
         self.K = K
         self.hsl1 = nn.ModuleList(HSL1(after_HGNN_dim) for _ in range(self.K))
         self.hsl2 = nn.ModuleList(HSL2(n_c, after_HGNN_dim, addr, temp) for temp, addr in zip(temperature, add_ratio))
         self.hyperG = HyperG(after_HGNN_dim, hid_state_dim)
 
+    def forward(self, X, H):
+        V = torch.nonzero(H)[:, 0]
+        E = torch.nonzero(H)[:, 1]
+
+        if self.HGNN_layer_num >= 0:
+            X1 = self.hgnn(X, V, E, H)
+        else:
+            X1 = F.leaky_relu(self.nohgnn(X))
+
+        O = torch.stack(self.hsl1[i](X, V, E) for i in range(self.K))
+        tp = torch.stack(self.hsl2[i](X, V, E, H, O[i]) for i in range(self.K))
+        latent_tp = torch.stack(self.hyperG(X1, tp[i]) for i in range(self.K))
+        return tp, latent_tp, O
+
+class decoderRNN(nn.Module):
+    def __init__(self,):
+        super().__init__()
+        
+
     def forward(self):
         pass
-
 
 class SHy(nn.Module):
     def __init__(self, code_levels, device, single_dim):
