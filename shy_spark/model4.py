@@ -3,7 +3,7 @@ import torch.nn
 import torch.nn.functional as F
 from torch_scatter import scatter
 import pyro
-
+from loss import losses
 import numpy as np 
 from layers import *
 
@@ -233,20 +233,92 @@ class HSLEncoder(nn.Module):
         return tp, latent_tp, O
 
 class decoderRNN(nn.Module):
-    def __init__(self,):
+    def __init__(self, hidden, output):
         super().__init__()
+        self.gru = nn.GRU(hidden, hidden)
+        self.final = nn.Linear(hidden, output)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, input, hidden, X):
+        out = torch.matmul(input, X).view(-1, 1)
+        out = F.relu(out)
+        out, hid = self.gru(out, hidden)
+        out = self.sigmoid(self.final(out[0]))
+        return out, hid
+
+class HSLDecoder(nn.Module):
+    def __init__(self, ldim, K, pdim, code_num, device):
+        super().__init__()
+        self.context = nn.Linear(ldim*K, pdim)
+        self.reconst = nn.Linear(pdim, code_num)
+        self.code_num = code_num
+        self.device = device
+
+    def forward(self, latent_tp, visit_len, H, X):
+        ltp = torch.reshape(latent_tp, (1)).view(-1, 1)
+        decoder = self.context(ltp)
+
+        Hreconstructed = torch.zeros(visit_len, self.code_num, device=self.device)
+        target_tensor = H.T
+        decoder_input = torch.zeros(self.code_num, device=self.device)
+        for di in range(visit_len):
+            output, decoder_hidden = self.reconstruct_net(decoder_input, decoder_hidden, X)
+            Hreconstructed[di] = output[0]
+            decoder_input = target_tensor[di]
+        return Hreconstructed.T
+
+class attention(nn.Module):
+    def __init__(self, in_channel, code_num, kdim, heads, K):
+        super().__init__()
+        self.key = nn.Linear(in_channel, kdim)
+        self.query = nn.Linear(in_channel, kdim)
+        self.value = nn.Linear(in_channel, kdim)
+
+        self.multi_attn = nn.MultiheadAttention(kdim, heads)
+        self.output = nn.Linear(in_channel, 1, bias=False)
+
+        self.classifier = nn.Linear(in_channel, code_num)
+        self.softmax = nn.Softmax(dim=-1)
+
+    def forward(self, ltp):
+        keys = self.key(ltp)
+        querys = self.query(ltp)
+        values = self.value(ltp)
+
+        attn, _ = self.multi_attn(querys, keys, values, need_weights=False)
+        attn_tp = self.output(attn)
+        alpha = self.softmax(attn_tp)
+        pred = self.softmax(self.classifier(ltp))
+
+        final_pred = torch.sum(pred * torch.unsqueeze(alpha, -1).expand(-1, -1, pred.shape[-1]), -2)
+        return final_pred, alpha
         
 
-    def forward(self):
-        pass
-
 class SHy(nn.Module):
-    def __init__(self, code_levels, device, single_dim):
+    def __init__(self, code_levels, single_dim, HGNN_dim, after_HGNN_dim, HGNN_layer_num, nhead, num_TP, temperature, add_ratio, n_c, hid_state_dim, dropout, key_dim, SA_head, HGNN_model, device):
         super().__init__()
         max_vals = list(np.max(code_levels, axis=0))
         code_levels = torch.from_numpy(code_levels).to(device)
         code_dims = [single_dim] * code_levels.shape[1]
         self.hier_embed = HeirarchialEmbedding(code_levels, max_vals, code_dims)
+        
+        self.encoder = HSLEncoder(code_dims, HGNN_dim, after_HGNN_dim, HGNN_layer_num, nhead, num_TP, temperature, add_ratio, n_c, hid_state_dim, dropout, HGNN_model, device)
 
-    def forward(self):
-        return
+        self.decoder = HSLDecoder(hid_state_dim, num_TP, sum(code_dims), code_levels.shape[0], device)
+
+        self.fc = attention(hid_state_dim, code_levels.shape[0], key_dim, SA_head, num_TP)
+
+
+    def forward(self, Hs, visit_lens):
+        # Hierarchical embedding for medical codes.
+        X = self.hier_embed_layer()
+        # Obtain multiple temporal phenotypes (and latent representations) via HSL & Decoder.
+        tp_list = []; latent_tp_list = []; recon_H_list = []
+        for i in range(len(Hs)):
+            tp, latent_tp, _ = self.encoder(X, Hs[i][:, 0:int(visit_lens[i])])
+            tp_list.append(tp)
+            latent_tp_list.append(latent_tp)
+            recon_H_list.append(self.decoder(latent_tp, visit_lens[i], Hs[i], X))
+        # Classify based on the temporal phenotype embeddings.
+        pred, alphas = self.fclf(torch.stack(latent_tp_list))
+        return pred, tp_list, recon_H_list, alphas
